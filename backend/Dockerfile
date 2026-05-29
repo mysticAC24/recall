@@ -11,7 +11,7 @@ WORKDIR /build
 # Install system deps needed to compile native extensions
 RUN apt-get update && apt-get install -y --no-install-recommends \
     build-essential \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
@@ -26,7 +26,7 @@ WORKDIR /app
 
 # Install runtime system deps only (opencv-headless, etc.)
 RUN apt-get update && apt-get install -y --no-install-recommends \
-    libgl1-mesa-glx \
+    libgl1 \
     libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/*
 
