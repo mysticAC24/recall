@@ -62,9 +62,22 @@ class FaceService:
 
         # Import here to avoid slow import at module level
         from insightface.app import FaceAnalysis
+        import os
+        from pathlib import Path
+
+        # Use bundled model if present (avoids runtime download on Railway/Render).
+        # Falls back to insightface's default cache dir (~/.insightface) if not found.
+        bundled_models_dir = Path(__file__).resolve().parent.parent.parent / "models"
+        if bundled_models_dir.exists():
+            root = str(bundled_models_dir.parent)  # insightface expects root containing "models/"
+            logger.info("Using bundled model from %s", bundled_models_dir)
+        else:
+            root = os.path.expanduser("~/.insightface")
+            logger.info("Bundled model not found — using default cache dir %s", root)
 
         self._model = FaceAnalysis(
             name=model_name,
+            root=root,
             providers=["CPUExecutionProvider"],
         )
         # ctx_id=-1 ⇒ CPU; det_size 640×640 is the default
