@@ -1,0 +1,30 @@
+# FastAPI & Server
+fastapi==0.115.6
+uvicorn[standard]==0.34.0
+python-multipart==0.0.20
+
+# Database
+sqlalchemy[asyncio]==2.0.36
+asyncpg==0.30.0
+pgvector==0.3.6
+
+# Google Drive API
+google-api-python-client==2.159.0
+google-auth==2.37.0
+
+# Face Detection / Recognition
+insightface==0.7.3
+onnxruntime==1.19.2
+numpy>=1.24.0,<2.0.0
+opencv-python-headless==4.10.0.84
+
+# Configuration & Utilities
+pydantic-settings==2.7.1
+httpx==0.28.1
+Pillow>=10.0.0
+pillow-heif>=0.18.0
+requests>=2.31.0
+google-auth-httplib2>=0.2.0
+
+# Logging
+structlog==24.4.0

@@ -1,0 +1,11 @@
+__pycache__/
+*.pyc
+venv/
+backend/venv/
+.env
+node_modules/
+.next/
+.vercel/
+.DS_Store
+*.pem
+service-account.json
