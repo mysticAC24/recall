@@ -58,7 +58,7 @@ async def _resume_interrupted_indexing() -> None:
 
     async with async_session() as session:
         result = await session.execute(
-            select(Event).where(Event.status == "processing")
+            select(Event).where(Event.status.in_(["processing", "pending"]))
         )
         stuck = result.scalars().all()
 

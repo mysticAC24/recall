@@ -30,6 +30,11 @@ from app.services.face import face_service
 
 logger = logging.getLogger(__name__)
 
+# Global indexing lock: ensures only ONE event indexes at a time across the
+# whole process. Without this, auto-resume plus a freshly created event could
+# run multiple heavy face-detection jobs at once and OOM-kill the container.
+_index_lock = asyncio.Lock()
+
 
 def _build_thumbnail_url(file_id: str) -> str:
     """Construct a Google Drive thumbnail URL."""
@@ -168,6 +173,9 @@ async def index_event(event_id: uuid.UUID, folder_id: str) -> None:
     """
     settings = get_settings()
 
+    # Hold the global lock for the whole run so indexing jobs queue instead
+    # of stacking — only one event is ever processed at a time (memory safety).
+    await _index_lock.acquire()
     try:
         await _update_event_progress(event_id, status="processing")
 
@@ -229,3 +237,5 @@ async def index_event(event_id: uuid.UUID, folder_id: str) -> None:
     except Exception:
         logger.exception("Event %s indexing failed with unhandled error", event_id)
         await _update_event_progress(event_id, status="failed")
+    finally:
+        _index_lock.release()
