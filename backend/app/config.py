@@ -39,7 +39,11 @@ class Settings(BaseSettings):
 
     # ── Face recognition ──────────────────────────────────────────────
     insightface_model: str = "buffalo_sc"
-    similarity_threshold: float = 0.55
+    # Cosine-similarity cutoff for a face "match". Lowered from 0.55 to 0.45:
+    # buffalo_sc is the small model, so near-identical photos of the same
+    # person can score just under a strict threshold and get dropped. 0.45
+    # favours recall (find all of a user's photos) over strict precision.
+    similarity_threshold: float = 0.45
 
     # ── CORS ──────────────────────────────────────────────────────────
     cors_origins: str = "http://localhost:3000,http://localhost:5173"

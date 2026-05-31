@@ -53,21 +53,30 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """
     logger.info("🚀 Recall backend starting up…")
 
+    # Initialise heavy resources. A failure here is logged but does NOT
+    # crash the app — login, health, and other lightweight endpoints stay
+    # up. Indexing/search endpoints depend on these services and will
+    # re-attempt initialisation (or surface a clear error) when called.
+
     # Initialise face detection model
     try:
         face_service.init_model()
         logger.info("✅ Face detection model loaded")
     except Exception:
-        logger.exception("❌ Failed to load face detection model")
-        raise
+        logger.exception(
+            "❌ Failed to load face detection model — continuing without it. "
+            "Login/health stay available; indexing & search will be degraded."
+        )
 
     # Initialise Google Drive client
     try:
         drive_service.build_service()
         logger.info("✅ Google Drive service initialised")
     except Exception:
-        logger.exception("❌ Failed to initialise Google Drive service")
-        raise
+        logger.exception(
+            "❌ Failed to initialise Google Drive service — continuing without it. "
+            "Login/health stay available; indexing will be degraded."
+        )
 
     logger.info("🟢 Recall backend ready")
     yield  # ← app is running
