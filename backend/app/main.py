@@ -39,6 +39,43 @@ logger = logging.getLogger(__name__)
 # Lifespan (startup / shutdown)
 # ──────────────────────────────────────────────────────────────────────
 
+async def _resume_interrupted_indexing() -> None:
+    """Re-launch indexing for events left in 'processing' by a restart.
+
+    The indexer runs as an in-memory background task, so a redeploy or an
+    OOM kill abandons any in-flight event (its status stays 'processing'
+    forever). On startup we find those events and restart their indexing.
+    Indexing is idempotent — photos already stored are skipped — so this
+    resumes rather than redoes the work.
+    """
+    import asyncio
+
+    from sqlalchemy import select
+
+    from app.database import async_session
+    from app.models import Event
+    from app.services.indexer import index_event
+
+    async with async_session() as session:
+        result = await session.execute(
+            select(Event).where(Event.status == "processing")
+        )
+        stuck = result.scalars().all()
+
+    if not stuck:
+        return
+
+    for event in stuck:
+        logger.info(
+            "↻ Resuming interrupted indexing for event %s (%s)",
+            event.id, event.name,
+        )
+        asyncio.create_task(
+            index_event(event.id, event.drive_folder_id),
+            name=f"resume-index-{event.id}",
+        )
+
+
 @asynccontextmanager
 async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
     """Application lifespan: initialise heavy resources once.
@@ -77,6 +114,15 @@ async def lifespan(app: FastAPI) -> AsyncGenerator[None, None]:
             "❌ Failed to initialise Google Drive service — continuing without it. "
             "Login/health stay available; indexing will be degraded."
         )
+
+    # Resume any indexing that was interrupted by a restart/crash. The
+    # background indexer runs in-memory, so a redeploy or OOM kill leaves
+    # events stranded in "processing". Re-launching is safe and resumable:
+    # already-indexed photos are skipped, so it picks up where it left off.
+    try:
+        await _resume_interrupted_indexing()
+    except Exception:
+        logger.exception("Failed while resuming interrupted indexing")
 
     logger.info("🟢 Recall backend ready")
     yield  # ← app is running

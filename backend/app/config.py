@@ -49,7 +49,10 @@ class Settings(BaseSettings):
     cors_origins: str = "http://localhost:3000,http://localhost:5173"
 
     # ── Indexing ──────────────────────────────────────────────────────
-    indexing_concurrency: int = 3
+    # Number of photos processed in parallel. Kept low (2) so peak memory
+    # stays well within small hosting tiers (e.g. Railway) and avoids the
+    # OOM restarts that killed large indexing runs. Raise if you have more RAM.
+    indexing_concurrency: int = 2
 
     # ── Helpers ───────────────────────────────────────────────────────
 

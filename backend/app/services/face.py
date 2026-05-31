@@ -103,7 +103,7 @@ class FaceService:
         nparr = np.frombuffer(image_bytes, np.uint8)
         img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if img is not None:
-            return img
+            return self._downscale(img)
 
         # Attempt 2: PIL (handles HEIC via pillow-heif if installed, plus
         # more TIFF variants, animated GIFs, and other edge cases)
@@ -122,7 +122,7 @@ class FaceService:
             # PIL is RGB, OpenCV/InsightFace expect BGR
             img = np.array(pil_img)[:, :, ::-1].copy()
             logger.debug("PIL fallback decoder used for image (%d bytes)", len(image_bytes))
-            return img
+            return self._downscale(img)
         except Exception as pil_exc:
             logger.warning("PIL fallback decoder failed: %s", pil_exc)
 
@@ -130,6 +130,26 @@ class FaceService:
             f"Could not decode image bytes ({len(image_bytes)} bytes) — "
             "format may be unsupported. HEIC support requires: pip install pillow-heif"
         )
+
+    # Longest side a decoded image is allowed to keep before face detection.
+    # Full-resolution DSLR photos (24MP+) decode to ~100MB arrays and blow up
+    # memory; faces are detected just as well at this size, and it cuts peak
+    # RAM/CPU per image by ~10x — the key to indexing large batches on small
+    # hosts without OOM crashes.
+    _MAX_DECODE_DIM = 1920
+
+    def _downscale(self, img: np.ndarray) -> np.ndarray:
+        """Shrink an image so its longest side is at most ``_MAX_DECODE_DIM``.
+
+        Images already within the limit are returned unchanged.
+        """
+        h, w = img.shape[:2]
+        longest = max(h, w)
+        if longest <= self._MAX_DECODE_DIM:
+            return img
+        scale = self._MAX_DECODE_DIM / float(longest)
+        new_size = (max(1, int(w * scale)), max(1, int(h * scale)))
+        return cv2.resize(img, new_size, interpolation=cv2.INTER_AREA)
 
     def get_faces(self, image_bytes: bytes) -> list[Any]:
         """Detect all faces in an image.
