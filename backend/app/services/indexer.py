@@ -97,6 +97,19 @@ async def _process_single_image(
         try:
             logger.info("Processing image: %s (id=%s)", filename, file_id)
 
+            # Fast path: skip photos already indexed BEFORE the expensive
+            # download + face detection. Essential for resume-after-crash —
+            # otherwise every restart re-processes all completed photos,
+            # repeating the same memory load and never advancing past it.
+            async with async_session() as session:
+                existing = await session.execute(
+                    text("SELECT id FROM photos WHERE drive_file_id = :fid"),
+                    {"fid": file_id},
+                )
+                if existing.fetchone() is not None:
+                    logger.debug("Photo %s already indexed — skipping (fast)", file_id)
+                    return True
+
             # Download image (I/O-bound but uses sync google-api-client,
             # so run in threadpool)
             loop = asyncio.get_running_loop()
