@@ -9,16 +9,19 @@ Endpoints:
 
 from __future__ import annotations
 
+import asyncio
 import logging
 import uuid
 
 from fastapi import APIRouter, Depends, HTTPException, Query, status
+from fastapi.responses import Response
 from sqlalchemy import func, select
 from sqlalchemy.ext.asyncio import AsyncSession
 
 from app.database import get_db
 from app.models import Event, Photo
 from app.schemas import ErrorResponse, PhotoResponse
+from app.services.drive import DriveService
 
 logger = logging.getLogger(__name__)
 
@@ -130,3 +133,37 @@ async def get_photo(
         )
 
     return PhotoResponse.model_validate(photo)
+
+
+@router.get(
+    "/{photo_id}/download",
+    summary="Download a photo's original file via Drive proxy",
+    responses={404: {"model": ErrorResponse}},
+)
+async def download_photo(
+    photo_id: uuid.UUID,
+    db: AsyncSession = Depends(get_db),
+) -> Response:
+    """Proxy the original Google Drive file to the client as an attachment."""
+    result = await db.execute(select(Photo).where(Photo.id == photo_id))
+    photo = result.scalar_one_or_none()
+
+    if photo is None:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail=f"Photo {photo_id} not found")
+
+    if not photo.drive_file_id:
+        raise HTTPException(status_code=status.HTTP_404_NOT_FOUND, detail="No Drive file ID for this photo")
+
+    try:
+        drive = DriveService()
+        data = await asyncio.get_event_loop().run_in_executor(None, drive.download_image_bytes, photo.drive_file_id)
+    except Exception as exc:
+        logger.error("Failed to download photo %s from Drive: %s", photo_id, exc)
+        raise HTTPException(status_code=status.HTTP_502_BAD_GATEWAY, detail="Could not fetch photo from Drive")
+
+    filename = photo.filename or f"{photo_id}.jpg"
+    return Response(
+        content=data,
+        media_type="image/jpeg",
+        headers={"Content-Disposition": f'attachment; filename="{filename}"'},
+    )
