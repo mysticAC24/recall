@@ -16,9 +16,12 @@ function PhotoCard({ result, index }: { result: MatchedPhoto; index: number }) {
 
   const handleDownload = (e: React.MouseEvent) => {
     e.stopPropagation();
-    if (result.image_url) {
-      window.open(result.image_url, "_blank");
-    }
+    const a = document.createElement("a");
+    a.href = `${process.env.NEXT_PUBLIC_API_URL || ""}/photos/${result.photo_id}/download`;
+    a.download = "";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
   };
 
   return (
@@ -116,18 +119,24 @@ export default function ResultsPage() {
     if (!data || data.matches.length === 0) return;
 
     setIsDownloadingAll(true);
-    toast.info(`Opening ${data.matches.length} photos for download...`);
+    toast.info(`Downloading ${data.matches.length} photos...`);
 
+    const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
     for (let i = 0; i < data.matches.length; i++) {
-      const url = data.matches[i].image_url;
-      if (url) window.open(url, "_blank");
+      const { photo_id } = data.matches[i];
+      const a = document.createElement("a");
+      a.href = `${apiBase}/photos/${photo_id}/download`;
+      a.download = "";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
       if (i < data.matches.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 300));
+        await new Promise((resolve) => setTimeout(resolve, 500));
       }
     }
 
     setIsDownloadingAll(false);
-    toast.success("All photos opened! Save them from your browser.");
+    toast.success("All photos downloaded!");
   }, [data]);
 
   // No data at all
