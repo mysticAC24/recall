@@ -99,9 +99,30 @@ class FaceService:
         Raises:
             ValueError: If the image cannot be decoded by any method.
         """
-        # Attempt 1: OpenCV (handles JPEG, PNG, WebP, BMP, standard TIFF)
+        # Attempt 1: OpenCV (handles JPEG, PNG, WebP, BMP, standard TIFF).
+        #
+        # Decode large images at a reduced scale so a 24MP photo never
+        # materialises as a ~70MB array — that per-image spike is what
+        # OOM-kills small containers. We peek at the dimensions cheaply (PIL
+        # reads the header without decoding pixels) and only reduce when the
+        # result stays at/above the downstream target resolution, so face
+        # detection quality is unaffected.
+        read_flag = cv2.IMREAD_COLOR
+        try:
+            import io as _io
+            from PIL import Image as _Image
+
+            with _Image.open(_io.BytesIO(image_bytes)) as _probe:
+                longest_side = max(_probe.size)
+            if longest_side >= self._MAX_DECODE_DIM * 4:
+                read_flag = cv2.IMREAD_REDUCED_COLOR_4
+            elif longest_side >= self._MAX_DECODE_DIM * 2:
+                read_flag = cv2.IMREAD_REDUCED_COLOR_2
+        except Exception:
+            pass  # Fall back to a full-resolution decode below.
+
         nparr = np.frombuffer(image_bytes, np.uint8)
-        img = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
+        img = cv2.imdecode(nparr, read_flag)
         if img is not None:
             return self._downscale(img)
 

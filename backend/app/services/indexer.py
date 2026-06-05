@@ -240,8 +240,11 @@ async def index_event(event_id: uuid.UUID, folder_id: str) -> None:
         indexed = 0
         failed = 0
 
-        # Process in batches to update progress periodically
-        batch_size = 10
+        # Process in small batches so progress is written to the DB often —
+        # the bar advances in near-real-time and a crash loses at most a few
+        # photos of *displayed* progress (each photo is committed individually
+        # regardless, so no real work is redone on resume).
+        batch_size = 5
         for i in range(0, total, batch_size):
             batch = image_files[i : i + batch_size]
             tasks = [
@@ -266,6 +269,14 @@ async def index_event(event_id: uuid.UUID, folder_id: str) -> None:
             # Reclaim memory between batches so RSS stays flat across a long
             # run instead of creeping up until the container is OOM-killed.
             gc.collect()
+            # glibc holds freed heap by default; hand it back to the OS so RSS
+            # actually drops (otherwise it ratchets up toward the OOM limit).
+            try:
+                import ctypes
+
+                ctypes.CDLL("libc.so.6").malloc_trim(0)
+            except Exception:
+                pass
 
         # Step 3 — mark complete
         final_status = "completed" if indexed > 0 else "failed"
