@@ -15,6 +15,7 @@ Progress is written to the ``events`` table so the frontend can poll.
 from __future__ import annotations
 
 import asyncio
+import gc
 import logging
 import uuid
 from typing import Any, Optional
@@ -79,6 +80,7 @@ async def _process_single_image(
     event_id: uuid.UUID,
     file_info: dict[str, str],
     semaphore: asyncio.Semaphore,
+    already_indexed: set[str],
 ) -> bool:
     """Download one image, detect faces, and store results.
 
@@ -86,6 +88,9 @@ async def _process_single_image(
         event_id: The parent event UUID.
         file_info: Dict with ``id`` and ``name`` keys from the Drive API.
         semaphore: Concurrency-limiting semaphore.
+        already_indexed: Set of ``drive_file_id`` values already indexed for
+            this event (loaded once per run) — used for instant in-memory
+            skipping on resume.
 
     Returns:
         ``True`` if the image was processed successfully, ``False`` otherwise.
@@ -98,31 +103,39 @@ async def _process_single_image(
             logger.info("Processing image: %s (id=%s)", filename, file_id)
 
             # Fast path: skip photos already indexed BEFORE the expensive
-            # download + face detection. Essential for resume-after-crash —
-            # otherwise every restart re-processes all completed photos,
-            # repeating the same memory load and never advancing past it.
-            async with async_session() as session:
-                existing = await session.execute(
-                    text("SELECT id FROM photos WHERE drive_file_id = :fid"),
-                    {"fid": file_id},
-                )
-                if existing.fetchone() is not None:
-                    logger.debug("Photo %s already indexed — skipping (fast)", file_id)
-                    return True
+            # download + face detection. The set of already-indexed file IDs
+            # is loaded ONCE per run (see index_event), so resume-after-restart
+            # skips completed photos in-memory instantly — instead of one slow
+            # DB round-trip per photo, which previously made every restart
+            # spend minutes re-skipping and never advance past where it was.
+            if file_id in already_indexed:
+                return True
 
             # Download image (I/O-bound but uses sync google-api-client,
-            # so run in threadpool)
+            # so run in threadpool). Hard timeout so one stalled download
+            # can't freeze the whole pipeline — the primary get_media path
+            # has no timeout of its own.
             loop = asyncio.get_running_loop()
-            image_bytes = await loop.run_in_executor(
-                None, drive_service.download_image_bytes, file_id
+            image_bytes = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, drive_service.download_image_bytes, file_id
+                ),
+                timeout=90,
             )
             logger.info("Downloaded %s — %d bytes", filename, len(image_bytes))
 
-            # Detect faces (CPU-bound → threadpool)
-            face_data = await loop.run_in_executor(
-                None, face_service.get_embeddings_from_bytes, image_bytes
+            # Detect faces (CPU-bound → threadpool), also time-bounded.
+            face_data = await asyncio.wait_for(
+                loop.run_in_executor(
+                    None, face_service.get_embeddings_from_bytes, image_bytes
+                ),
+                timeout=120,
             )
             logger.info("Face detection complete for %s — %d face(s) found", filename, len(face_data))
+
+            # Release the decoded image buffer promptly — holding hundreds of
+            # multi-MB buffers across a run is what grows RSS until OOM.
+            del image_bytes
 
             # Persist photo + embeddings
             thumbnail_url = _build_thumbnail_url(file_id)
@@ -206,6 +219,22 @@ async def index_event(event_id: uuid.UUID, folder_id: str) -> None:
             await _update_event_progress(event_id, status="completed")
             return
 
+        # Load already-indexed file IDs for this event in ONE query so resume
+        # skips completed photos in-memory (instant) instead of a slow
+        # per-photo DB lookup. Re-checking hundreds of done photos one query
+        # at a time is what made restarts appear "stuck" — they spent their
+        # whole uptime re-skipping and never reached the unindexed ones.
+        async with async_session() as session:
+            rows = await session.execute(
+                text("SELECT drive_file_id FROM photos WHERE event_id = :eid"),
+                {"eid": str(event_id)},
+            )
+            already_indexed: set[str] = {row[0] for row in rows.fetchall()}
+        logger.info(
+            "Event %s: %d/%d photos already indexed — skipping those on resume",
+            event_id, len(already_indexed), total,
+        )
+
         # Step 2 — process images with concurrency limit
         semaphore = asyncio.Semaphore(settings.indexing_concurrency)
         indexed = 0
@@ -216,7 +245,8 @@ async def index_event(event_id: uuid.UUID, folder_id: str) -> None:
         for i in range(0, total, batch_size):
             batch = image_files[i : i + batch_size]
             tasks = [
-                _process_single_image(event_id, f, semaphore) for f in batch
+                _process_single_image(event_id, f, semaphore, already_indexed)
+                for f in batch
             ]
             results = await asyncio.gather(*tasks, return_exceptions=True)
 
@@ -232,6 +262,10 @@ async def index_event(event_id: uuid.UUID, folder_id: str) -> None:
             logger.info(
                 "Event %s: progress %d/%d (%d failed)", event_id, indexed, total, failed
             )
+
+            # Reclaim memory between batches so RSS stays flat across a long
+            # run instead of creeping up until the container is OOM-killed.
+            gc.collect()
 
         # Step 3 — mark complete
         final_status = "completed" if indexed > 0 else "failed"
