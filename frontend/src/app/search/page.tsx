@@ -13,6 +13,8 @@ export default function SearchPage() {
   const [preview, setPreview] = useState<string | null>(null);
   const [isDragging, setIsDragging] = useState(false);
   const [isSearching, setIsSearching] = useState(false);
+  const [searchProgress, setSearchProgress] = useState(0);
+  const [searchElapsed, setSearchElapsed] = useState(0);
   const [eventReady, setEventReady] = useState<boolean | null>(null);
   const inputRef = useRef<HTMLInputElement>(null);
   const router = useRouter();
@@ -28,6 +30,24 @@ export default function SearchPage() {
       })
       .catch(() => setEventReady(false));
   }, []);
+
+  // Progress bar + elapsed timer while a search runs. The search is a single
+  // request with no progress events, so we ease the bar toward ~92% and show
+  // the real elapsed time; it jumps to 100% when the response lands.
+  useEffect(() => {
+    if (!isSearching) return;
+    const start = Date.now();
+    setSearchProgress(0);
+    setSearchElapsed(0);
+    const id = setInterval(() => {
+      setSearchElapsed((Date.now() - start) / 1000);
+      setSearchProgress((p) => Math.min(92, p + (92 - p) * 0.07));
+    }, 120);
+    return () => {
+      clearInterval(id);
+      setSearchProgress(100);
+    };
+  }, [isSearching]);
 
   const processFile = useCallback((f: File) => {
     if (!ACCEPTED_TYPES.includes(f.type)) {
@@ -251,6 +271,24 @@ export default function SearchPage() {
             </>
           )}
         </Button>
+
+        {/* Search progress bar + elapsed timer */}
+        {isSearching && (
+          <div className="space-y-2 px-1 animate-fade-in" aria-live="polite">
+            <div className="h-2 w-full rounded-full bg-muted/40 overflow-hidden">
+              <div
+                className="h-full rounded-full bg-gradient-to-r from-amber-400 to-orange-500 transition-[width] duration-150 ease-out"
+                style={{ width: `${searchProgress}%` }}
+              />
+            </div>
+            <div className="flex items-center justify-between text-xs text-muted-foreground">
+              <span>Matching your face across the event…</span>
+              <span className="tabular-nums font-medium text-foreground/70">
+                {searchElapsed.toFixed(1)}s
+              </span>
+            </div>
+          </div>
+        )}
 
         {/* Tips */}
         <div className="flex items-start gap-3 p-4 rounded-xl glass text-sm">
