@@ -22,7 +22,7 @@ export function Footer() {
         <div className="flex flex-col sm:flex-row items-center justify-between gap-2 pt-4 border-t border-border/30">
           <p className="text-xs text-muted-foreground/60">
             Made with ♥ by{" "}
-            <span className="text-primary/80 font-medium">Student Alumni Relations, IIT Delhi</span>
+            <span className="text-primary/80 font-medium">Alumni Relations, IIT Delhi</span>
           </p>
           <p className="text-xs text-muted-foreground/60">
             © {new Date().getFullYear()} Recall

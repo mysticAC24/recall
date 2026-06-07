@@ -17,14 +17,14 @@ const outfit = Outfit({
 });
 
 export const metadata: Metadata = {
-  title: "Recall — Student Alumni Relations, IIT Delhi",
+  title: "Recall — Alumni Relations, IIT Delhi",
   description:
-    "AI-powered photo finder by Student Alumni Relations, IIT Delhi. Upload a selfie and instantly find all your photos from the event.",
+    "AI-powered photo finder by Alumni Relations, IIT Delhi. Upload a selfie and instantly find all your photos from the event.",
   keywords: ["photo finder", "face recognition", "IIT Delhi", "SAR", "college events", "AI photos"],
   openGraph: {
     title: "Recall — SAR IIT Delhi Photo Finder",
     description:
-      "Upload a selfie. Find every photo of you from the event. By Student Alumni Relations, IIT Delhi.",
+      "Upload a selfie. Find every photo of you from the event. By Alumni Relations, IIT Delhi.",
     type: "website",
   },
 };

@@ -1,5 +1,5 @@
 /**
- * Student Alumni Relations — IIT Delhi logo component.
+ * Alumni Relations — IIT Delhi logo component.
  * Reproduced as SVG to avoid needing an image file.
  */
 export function SARLogo({ className = "" }: { className?: string }) {
@@ -24,7 +24,7 @@ export function SARLogo({ className = "" }: { className?: string }) {
       {/* Text */}
       <div className="leading-tight">
         <div className="font-bold text-white text-sm sm:text-base tracking-wide uppercase">
-          Student Alumni Relations
+          Alumni Relations
         </div>
         <div className="text-white/75 text-xs sm:text-sm font-normal">
           Indian Institute of Technology Delhi
