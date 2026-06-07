@@ -103,6 +103,7 @@ function PhotoCard({ result, index }: { result: MatchedPhoto; index: number }) {
 export default function ResultsPage() {
   const [data, setData] = useState<SearchResponse | null>(null);
   const [isDownloadingAll, setIsDownloadingAll] = useState(false);
+  const [downloadProgress, setDownloadProgress] = useState(0);
 
   useEffect(() => {
     const stored = sessionStorage.getItem("recall_results");
@@ -118,25 +119,94 @@ export default function ResultsPage() {
   const handleDownloadAll = useCallback(async () => {
     if (!data || data.matches.length === 0) return;
 
-    setIsDownloadingAll(true);
-    toast.info(`Downloading ${data.matches.length} photos...`);
-
+    const matches = data.matches;
     const apiBase = process.env.NEXT_PUBLIC_API_URL || "";
-    for (let i = 0; i < data.matches.length; i++) {
-      const { photo_id } = data.matches[i];
+    setIsDownloadingAll(true);
+    setDownloadProgress(0);
+    toast.info(`Preparing a zip of ${matches.length} photos…`);
+
+    try {
+      // Bundle everything into ONE zip. Firing N separate browser downloads
+      // gets blocked by Chrome (multiple-download permission) and overwhelms
+      // the connection — a single zip avoids both.
+      const JSZip = (await import("jszip")).default;
+      const zip = new JSZip();
+
+      // Keep zip entry names unique (two photos can share a filename)
+      const used = new Set<string>();
+      const uniqueName = (name: string) => {
+        const safe = name || "photo.jpg";
+        if (!used.has(safe)) { used.add(safe); return safe; }
+        const dot = safe.lastIndexOf(".");
+        const base = dot > 0 ? safe.slice(0, dot) : safe;
+        const ext = dot > 0 ? safe.slice(dot) : "";
+        let k = 2;
+        while (used.has(`${base} (${k})${ext}`)) k++;
+        const u = `${base} (${k})${ext}`;
+        used.add(u);
+        return u;
+      };
+
+      // Fetch one photo's bytes, with a single retry for the flaky path
+      const fetchBlob = async (photoId: string): Promise<Blob> => {
+        for (let attempt = 0; attempt < 2; attempt++) {
+          try {
+            const res = await fetch(`${apiBase}/photos/${photoId}/download`);
+            if (!res.ok) throw new Error(`HTTP ${res.status}`);
+            return await res.blob();
+          } catch (e) {
+            if (attempt === 1) throw e;
+            await new Promise((r) => setTimeout(r, 800));
+          }
+        }
+        throw new Error("unreachable");
+      };
+
+      // Limited concurrency so we don't saturate the connection
+      let done = 0;
+      let failed = 0;
+      const CONCURRENCY = 4;
+      const queues: MatchedPhoto[][] = Array.from({ length: CONCURRENCY }, () => []);
+      matches.forEach((m, i) => queues[i % CONCURRENCY].push(m));
+      await Promise.all(
+        queues.map(async (q) => {
+          for (const m of q) {
+            try {
+              zip.file(uniqueName(m.filename), await fetchBlob(m.photo_id));
+            } catch {
+              failed++;
+            }
+            done++;
+            setDownloadProgress(done);
+          }
+        })
+      );
+
+      if (used.size === 0) {
+        toast.error("Couldn't download any photos. Please try again.");
+        return;
+      }
+
+      const zipBlob = await zip.generateAsync({ type: "blob" });
+      const url = URL.createObjectURL(zipBlob);
       const a = document.createElement("a");
-      a.href = `${apiBase}/photos/${photo_id}/download`;
-      a.download = "";
+      a.href = url;
+      a.download = "recall-photos.zip";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);
-      if (i < data.matches.length - 1) {
-        await new Promise((resolve) => setTimeout(resolve, 500));
-      }
-    }
+      URL.revokeObjectURL(url);
 
-    setIsDownloadingAll(false);
-    toast.success("All photos downloaded!");
+      toast.success(
+        `Downloaded ${used.size} photo${used.size !== 1 ? "s" : ""} as a zip` +
+          (failed ? ` (${failed} couldn't be fetched)` : "")
+      );
+    } catch (err) {
+      toast.error(err instanceof Error ? err.message : "Download failed. Please try again.");
+    } finally {
+      setIsDownloadingAll(false);
+      setDownloadProgress(0);
+    }
   }, [data]);
 
   // No data at all
@@ -235,7 +305,7 @@ export default function ResultsPage() {
                     <circle className="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" strokeWidth="4" />
                     <path className="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4z" />
                   </svg>
-                  Downloading...
+                  {downloadProgress > 0 ? `Zipping ${downloadProgress}/${data.matches.length}…` : "Preparing…"}
                 </>
               ) : (
                 <>
